@@ -1,6 +1,8 @@
 # Prerequisites
 *.d
+pg/
 
+*.zip
 # Compiled Object files
 *.slo
 *.lo
