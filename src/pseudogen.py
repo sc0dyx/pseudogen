@@ -1,7 +1,17 @@
 import re
 import argparse
 import json
-from const import START, BLOCK, CONDITION, INPUT_OUTPUT, END
+import os
+import sys
+import json
+
+
+from .Python2FlowChart.Python2FlowChart.PyPreprocessor import PyPreprocessor
+from .Python2FlowChart.Python2FlowChart.Py2BlockDiagram import Py2BlockDiagram
+from .Python2FlowChart.Python2FlowChart.Py2PseudoCode import Py2PseudoCode
+from .Python2FlowChart.Python2FlowChart.CppBlockDiagram import CppBlockDiagram
+from .Python2FlowChart.Python2FlowChart.CppPseudoCode import CppPseudoCode
+from .Python2FlowChart.Python2FlowChart.CppPreprocessor import CppPreprocessor
 
 
 class PseudoGen:
@@ -39,25 +49,68 @@ class PseudoGen:
                     processed = pattern.sub(replacement, processed)
                 output_file.write(processed)
 
+    def _generate_py_scheme(self):
+        with open(self.input, "r", encoding="utf-8") as read:
+            p = PyPreprocessor(read)
+        programs_list = p.get_programs_list()
+        return Py2BlockDiagram.build_from_programs_list(
+            programs_list, Py2PseudoCode, Py2BlockDiagram
+        )
+
+    def _generate_cpp_scheme(self):
+        with open(self.input, "r", encoding="utf-8") as read:
+            p = CppPreprocessor(read)
+        programs_list = p.get_programs_list()
+        return CppBlockDiagram.build_from_programs_list(
+            programs_list, CppPseudoCode, CppBlockDiagram
+        )
+
+    def blockgen(self):
+        # Проверяем расширение
+        is_cpp = (
+            self.input.endswith(".cpp")
+            or self.input.endswith(".hpp")
+            or self.input.endswith(".h")
+        )
+
+        # Вызываем строго изолированный метод под конкретный язык
+        if is_cpp:
+            diagram = self._generate_cpp_scheme()
+            lang_name = "C++"
+        else:
+            diagram = self._generate_py_scheme()
+            lang_name = "Python"
+
+        if not self.output.endswith(".json"):
+            self.output = f"{self.output}.json"
+
+        with open(self.output, "w+", encoding="utf-8") as write:
+            write.write(json.dumps(diagram, indent=4))
+
+        print(f"[{lang_name}] Diagram has been saved as {self.output}")
+        print("Upload it here: https://programforyou.ru/block-diagram-redactor")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="pseudogen - pseudocode and flowchart generator"
     )
-    # Обязательный аргумент
+    # Обязательные аргументы
     parser.add_argument("-i", "--input", required=True, help="path to code")
     parser.add_argument("-g", "--pgen", help="path to pgen")
     parser.add_argument("-o", "--output", required=True, help="output file")
-    # parser.add_argument(
-    #     "-t",
-    #     "--type",
-    #     choices=["blockscheme", "pseudocode"],
-    #     help="blockscheme or pseudocode",
-    # )
+    parser.add_argument(
+        "-t",
+        "--type",
+        choices=["blockscheme", "pseudocode"],
+        default="pseudocode",
+        help="blockscheme or pseudocode",
+    )
     args = parser.parse_args()
-    # if args.type == "pseudocode":
-    pg = PseudoGen(args.input, args.pgen, args.output)
-    pg.pseudocode()
-    # elif args.type == "blockscheme":
-    #     pg = PseudoGen(args.input, output_path=args.output)
-    #     pg.blockgen()
+
+    if args.type == "pseudocode":
+        pg = PseudoGen(args.input, args.pgen, args.output)
+        pg.pseudocode()
+    elif args.type == "blockscheme":
+        pg = PseudoGen(args.input, output_path=args.output)
+        pg.blockgen()

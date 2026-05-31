@@ -2,6 +2,11 @@
 *.d
 pg/
 
+# test files
+*.json
+*.txt
+# -- - - - -
+
 *.zip
 # Compiled Object files
 *.slo
@@ -41,3 +46,5 @@ pg/
 
 # debug information files
 *.dwo
+__pycache__/
+*.pyc

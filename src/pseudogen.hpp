@@ -9,6 +9,40 @@
 #include <vector>
 
 class PseudoGen {
+private:
+  std::string apply_pgen_rules(std::string line) {
+    struct Rule {
+      std::regex re;
+      std::string rep;
+    };
+    static const std::vector<Rule> rules = {
+        {std::regex(R"(\busing namespace std;?\b)"), ""},
+        {std::regex(R"(#include\s*<.*>)"), ""},
+        {std::regex(R"(\b(int|bool|string|float|double|char|long)\s+)"), ""},
+        {std::regex(R"(\bif\s*\()"), "если "}, // Убрал скобку в замене
+        {std::regex(R"(\belse if\b)"), "иначе если "},
+        {std::regex(R"(\belse\b)"), "иначе"},
+        {std::regex(R"(\bfor\s*\()"), "цикл "},   // Убрал скобку
+        {std::regex(R"(\bwhile\s*\()"), "пока "}, // Убрал скобку
+        {std::regex(R"(\bcout\s*<<\s*)"), "вывод: "},
+        {std::regex(R"(\bcin\s*>>\s*)"), "ввод: "},
+        // Экранируем { и } для регулярок и чистим мусор
+        {std::regex(R"(std::|;|"|endl|<<|>>|\{|\})"), " "},
+        {std::regex(R"(\s*&&\s*)"), " И "},
+        {std::regex(R"(\s*\|\|\s*)"), " ИЛИ "}};
+
+    for (const auto &rule : rules) {
+      line = std::regex_replace(line, rule.re, rule.rep);
+    }
+
+    // Убираем лишние пробелы и финальные скобки С++, которые могли остаться
+    line = std::regex_replace(line, std::regex(R"(\)\s*$)"), "");
+    line = std::regex_replace(line, std::regex(R"(\s+)"), " ");
+    line = std::regex_replace(line, std::regex(R"(^\s+|\s+$)"), "");
+
+    return line;
+  }
+
 public:
   std::string output, input, pgen;
   void init_files(std::string input, std::string pgen, std::string output) {
@@ -55,71 +89,64 @@ public:
     }
   }
 
-  void blockgen() {
+  void blockgen_html() {
     std::ifstream file(this->input);
-    std::ofstream out(this->output);
-    std::string line;
-    struct BlockData {
-      std::string text, type;
-      int y;
-    };
-    std::vector<BlockData> v_blocks;
+    std::ofstream out(this->output + ".html");
 
-    int currentY = 100;
+    // "Бессмертный" шаблон с библиотекой внутри
+    out << "<!DOCTYPE html>\n<html>\n<head><meta charset='UTF-8'>\n"
+        << "<script "
+           "src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/"
+           "mermaid.min.js'></script>\n"
+        << "</head>\n<body>\n<div class='mermaid'>\n  graph TD\n";
+
+    std::string line;
+    int id = 0;
+    std::vector<int> node_ids;
+
     while (std::getline(file, line)) {
-      line = std::regex_replace(line, std::regex("^\\s+|\\s+$"), ""); // trim
-      if (line.empty() || line.find("#include") != std::string::npos ||
-          line.find("using namespace") != std::string::npos || line == "{" ||
-          line == "}")
+      // Убираем лишние пробелы
+      line = std::regex_replace(line, std::regex("^\\s+|\\s+$"), "");
+      if (line.empty() || line == "{" || line == "}")
         continue;
 
-      // Жесткое экранирование для JSON
-      std::string escaped = "";
-      for (char c : line) {
-        if (c == '\"')
-          escaped += "\\\"";
-        else if (c == '\\')
-          escaped += "\\\\";
-        else
-          escaped += c;
+      std::string clean_text = apply_pgen_rules(line);
+
+      // Определяем форму блока Mermaid
+      std::string start_cap = "[", end_cap = "]"; // Процесс по умолчанию
+
+      if (line.find("for") != std::string::npos) {
+        start_cap = "{{";
+        end_cap = "}}"; // Шестиугольник (цикл)
+      } else if (line.find("if") != std::string::npos ||
+                 line.find("while") != std::string::npos) {
+        start_cap = "{";
+        end_cap = "}"; // Ромб (условие)
+      } else if (line.find("cout") != std::string::npos ||
+                 line.find("cin") != std::string::npos) {
+        start_cap = "[/";
+        end_cap = "/]"; // Параллелограмм (ввод/вывод)
+      } else if (line.find("main") != std::string::npos ||
+                 line.find("return") != std::string::npos) {
+        start_cap = "([";
+        end_cap = "])"; // Скругленный (начало/конец)
       }
 
-      std::string type = "Процесс";
-      if (std::regex_search(line, std::regex("\\b(if|while|for|switch)\\b")))
-        type = "Условие";
-      else if (line.find("main") != std::string::npos ||
-               line.find("return") != std::string::npos)
-        type = "Начало / конец";
-
-      v_blocks.push_back({escaped, type, currentY});
-      currentY += 100;
+      out << "    node" << id << start_cap << "\"" << clean_text << "\""
+          << end_cap << "\n";
+      node_ids.push_back(id);
+      id++;
     }
 
-    out << "{\"blocks\":[";
-    for (size_t i = 0; i < v_blocks.size(); ++i) {
-      out << "{\"x\":360,\"y\":" << v_blocks[i].y << ",\"text\":\""
-          << v_blocks[i].text << "\",\"width\":120,\"height\":40,\"type\":\""
-          << v_blocks[i].type
-          << "\",\"isMenuBlock\":false,\"fontSize\":14,\"textHeight\":14,"
-          << "\"isBold\":false,\"isItalic\":false,\"textAlign\":\"center\","
-             "\"labelsPosition\":1}";
-      if (i < v_blocks.size() - 1)
-        out << ",";
+    // Простейшая связь сверху вниз
+    for (size_t i = 0; i + 1 < node_ids.size(); ++i) {
+      out << "    node" << node_ids[i] << " --> node" << node_ids[i + 1]
+          << "\n";
     }
 
-    out << "],\"arrows\":[";
-    for (size_t i = 0; i + 1 < v_blocks.size(); ++i) {
-      int y1 = v_blocks[i].y + 20;
-      int y2 = v_blocks[i + 1].y - 20;
-      out << "{\"startIndex\":" << i << ",\"endIndex\":" << i + 1
-          << ",\"startConnectorIndex\":2,\"endConnectorIndex\":0,\"nodes\":["
-          << "{\"x\":360,\"y\":" << y1 << "},{\"x\":360,\"y\":" << (y1 + y2) / 2
-          << "},{\"x\":360,\"y\":" << y2 << "}],"
-          << "\"counts\":[1,1,1]}";
-      if (i + 2 < v_blocks.size())
-        out << ",";
-    }
-    out << "],\"x0\":0,\"y0\":0}";
+    out << "  </div>\n<script>mermaid.initialize({startOnLoad:true, "
+           "theme:'neutral'});</script>\n"
+        << "</body>\n</html>";
   }
 };
 #endif

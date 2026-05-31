@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
   pg.input = input_file;
   pg.output = output_file;
   if (type == "blockscheme")
-    pg.blockgen();
+    pg.blockgen_html();
   else {
     pg.pgen = pgen_file;
     pg.pseudocode();
