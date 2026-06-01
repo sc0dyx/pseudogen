@@ -1,0 +1,5 @@
+venv/
+Python2FlowChart.egg-info/
+.vscode/
+libs/
+PyChart
