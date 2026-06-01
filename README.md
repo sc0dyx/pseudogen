@@ -1,6 +1,6 @@
-# ⚡ pseudogen — Ultimate Flowchart & Pseudocode Generator
+# ⚡ pseudogen — Pseudocode && Blockscheme Generator
 
-Ультимативный автоматизированный конвейер для студентов, превращающий исходный код в идеальные блок-схемы строго по **ГОСТ 19.701-90** и чистый псевдокод. Больше никакой ручной отрисовки стрелочек в Visio или Draw.io. Генерируй схемы в один клик и получай свои заслуженные 9 и 10 на лабах!
+Автоматизированный конвейер для студентов, превращающий исходный код в идеальные блок-схемы строго по **ГОСТ 19.701-90** и чистый псевдокод. Больше никакой ручной отрисовки стрелочек в Visio или Draw.io. Генерируй схемы в один клик и получай свои заслуженные 9 и 10 на лабах!
 
 ---
 
@@ -9,7 +9,6 @@
 * **Полная всеядность**: Автоматически распознает и парсит файлы на **C++** (`.cpp`, `.hpp`) и **Python** (`.py`).
 * **Тотальный клининг текста**: Вырезает плюсовый и питонячий мусор (`int main()`, `std::`, `endl`, `;`).
 * **ГОСТ-оформление**: Автоматически форматирует ввод/вывод в стиле `Ввод: ...` / `Вывод: ...`, разворачивает инкременты (`i++` -> `i = i + 1`) и ставит красивые математические знаки (`×`, `÷`, `≠`).
-* **Выпрямленная геометрия**: Стрелки циклов и условий переписаны с нуля — ветка «Да» идет строго вниз, а петля возврата заходит в ромб аккуратно сверху.
 
 ---
 
@@ -17,7 +16,7 @@
 
 Программа запускается как модуль из корня репозитория.
 
-### 1. Генерация текстового псевдокода (Твой родной движок)
+### 1. Генерация текстового псевдокода
 
 ```bash
 python3 -m src.pseudogen -i input.cpp -g default.pgen -o output.txt -t pseudocode
@@ -36,10 +35,46 @@ python3 -m src.pseudogen -i лаба.cpp -o schema.json -t blockscheme_connect_a
 ## 🚀 Как получить готовую картинку?
 
 1. Сгенерируй JSON-файл схемы с помощью команды выше.
-2. Скопируй полученный файл или его содержимое.
-3. Зайди на сайт: [Редактор блок-схем programforyou.ru](https://programforyou.ru)
-4. И загрузи свой JSON.
-5. Забирай идеальную схему со стрелочками!
+2. Зайди на сайт: [Редактор блок-схем programforyou.ru](https://programforyou.ru/block-diagram-redactor)
+3. И загрузи свой JSON.
+4. Забирай идеальную схему со стрелочками!
+
+---
+
+## Пример
+
+Написал я вот такой код на С++
+
+```cpp
+#include <iostream>
+
+int main(){
+  std::cout << "Начало счетчика" << std::endl;
+  for (int i = 0; i < 10; i++){
+    std::cout << i << std::endl;
+  }
+  std::cout << "Конец счётчика" << std::endl;
+  return 0;
+}
+```
+
+файл назвал example.cpp
+
+```bash
+ ⚙  scodyx@localhost  ~/git/pseudogen   main  python3 -m src.pseudogen -i example.cpp -o output.json -t blockscheme   
+
+[C++] Diagram has been saved as output.json
+Upload it here: https://programforyou.ru/block-diagram-redactor
+ ⚙  scodyx@localhost  ~/git/pseudogen   main 
+```
+
+теперь загружаем файл output.json на сайт
+
+<img width="216" height="49" alt="image" src="https://github.com/user-attachments/assets/29fe31f8-df32-46bd-a020-548ba350b176" />
+
+и вот результат
+
+<img width="1280" height="720" alt="pseudogen_demo" src="https://github.com/user-attachments/assets/25455676-be54-4754-a8d7-6f044be55523" />
 
 ---
 
@@ -52,3 +87,4 @@ python3 -m src.pseudogen -i лаба.cpp -o schema.json -t blockscheme_connect_a
 ---
 Сделано студентом для студентов. Пользуйтесь, кайфуйте и закрывайте дедлайны по щелчку пальцев! 🍻
 
+<sup>*Планируем переписать python код на С++ (скоро ... )*</sup>
