@@ -14,18 +14,21 @@
 
 ## 🛠 Установка и Запуск
 
-Программа запускается как модуль из корня репозитория.
+```bash
+git clone https://github.com/sc0dyx/pseudogen.git
+pip install -e .
+```
 
 ### 1. Генерация текстового псевдокода
 
 ```bash
-python3 -m src.pseudogen -i input.cpp -g default.pgen -o output.txt -t pseudocode
+pseudogen -i input.cpp -g default.pgen -o output.txt -t pseudocode
 ```
 
 ### 2. Генерация ГОСТ блок-схемы (JSON)
 
 ```bash
-python3 -m src.pseudogen -i лаба.cpp -o schema.json -t blockscheme_connect_all_blocks_by_arro
+pseudogen -i лаба.cpp -o schema.json -t blockscheme
 ```
 
 *(Для Python-файлов просто скорми `.py` вместо `.cpp` — скрипт сам переключит парсер под капотом).*
