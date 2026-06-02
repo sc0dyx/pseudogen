@@ -16,6 +16,7 @@
 
 ```bash
 git clone https://github.com/sc0dyx/pseudogen.git
+cd pseudogen
 pip install -e .
 ```
 
