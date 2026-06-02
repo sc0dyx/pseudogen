@@ -4,14 +4,17 @@ import json
 import os
 import sys
 import json
+import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
 
-from .Python2FlowChart.Python2FlowChart.PyPreprocessor import PyPreprocessor
-from .Python2FlowChart.Python2FlowChart.Py2BlockDiagram import Py2BlockDiagram
-from .Python2FlowChart.Python2FlowChart.Py2PseudoCode import Py2PseudoCode
-from .Python2FlowChart.Python2FlowChart.CppBlockDiagram import CppBlockDiagram
-from .Python2FlowChart.Python2FlowChart.CppPseudoCode import CppPseudoCode
-from .Python2FlowChart.Python2FlowChart.CppPreprocessor import CppPreprocessor
+from Python2FlowChart.Python2FlowChart.PyPreprocessor import PyPreprocessor
+from Python2FlowChart.Python2FlowChart.Py2BlockDiagram import Py2BlockDiagram
+from Python2FlowChart.Python2FlowChart.Py2PseudoCode import Py2PseudoCode
+from Python2FlowChart.Python2FlowChart.CppBlockDiagram import CppBlockDiagram
+from Python2FlowChart.Python2FlowChart.CppPseudoCode import CppPseudoCode
+from Python2FlowChart.Python2FlowChart.CppPreprocessor import CppPreprocessor
 
 
 class PseudoGen:
@@ -91,7 +94,7 @@ class PseudoGen:
         print("Upload it here: https://programforyou.ru/block-diagram-redactor")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="pseudogen - pseudocode and flowchart generator"
     )
@@ -114,3 +117,7 @@ if __name__ == "__main__":
     elif args.type == "blockscheme":
         pg = PseudoGen(args.input, output_path=args.output)
         pg.blockgen()
+
+
+if __name__ == "__main__":
+    main()
