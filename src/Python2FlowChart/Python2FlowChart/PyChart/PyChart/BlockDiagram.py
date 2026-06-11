@@ -1,15 +1,14 @@
 import uuid
 from abc import ABC, abstractmethod
+from pprint import pprint
 
 
 class BlockDiagram(ABC):
-    _diagram = {
-        "blocks": [],
-        "arrows": [],
-        "x0": 0,
-        "y0": 100,
-    }
+    """
+    Базовый класс для построения блок-схемы из дерева кода.
+    """
 
+    # Атрибуты класса (общие для всех экземпляров)
     _direction = {
         "UP": 0,
         "RIGHT": 1,
@@ -17,11 +16,18 @@ class BlockDiagram(ABC):
         "LEFT": 3,
     }
 
+    # Переменные, которые обычно переопределяются в __init__, но пока оставим на уровне класса
     _last_x = 0
     _last_y = 0
     _last_if_id_list = []
     _last_arrow_pos_delta = 15
-    _blocks_indent = 150
+    _blocks_indent = 100
+    _diagram = {
+        "blocks": [],
+        "arrows": [],
+        "x0": 0,
+        "y0": 100,
+    }
 
     def __init__(
         self,
@@ -43,54 +49,68 @@ class BlockDiagram(ABC):
         self._variables = variables
         self._forbidden_aria = []
         self._start_block_index = start_block_index
+        self._final_merge = []
 
     def build(self) -> dict:
         name = self._name
         if name == "main":
             name = ""
 
-        if self._variables:
-            self._diagram["blocks"].insert(
-                0,
-                self._form_block(
-                    ",".join(self._variables),
-                    {"y": self._last_y, "x": self._last_x},
-                    uuid.uuid1().hex,
-                    "0",
-                    "Ввод / вывод",
-                ),
-            )
         self._diagram["blocks"].insert(
             0,
-            self._form_block(
+            self._return_block(
                 f"Начало {name}",
                 {"y": self._last_y - 100, "x": self._last_x},
-                uuid.uuid1().hex,
-                "0",
+                -1,
                 "Начало / конец",
             ),
         )
-        self._diagram["blocks"] += self._add_blocks(self._code_tree)
-        if self._name == "main":
-            self._diagram["blocks"].append(
-                self._form_block(
-                    "Конец",
-                    {"y": self._last_y + 100, "x": self._last_x},
-                    uuid.uuid1().hex,
-                    "0",
-                    "Начало / конец",
-                )
-            )
+        last_index, final_merge = self._add_blocks(self._code_tree, 0)
 
-        self._set_block_indexes()
-        self._align_if_else_bodies()
-        self._set_all_forbidden_areas()
+        self._diagram["blocks"].append(
+            self._return_block(
+                "Конец",
+                {"y": self._last_y - 100, "x": self._last_x},
+                final_merge if final_merge else [last_index],
+                "Начало / конец",
+            )
+        )
+
+        # --- inline _align_if_else_bodies() ---
+        # if_structs = self._find_blocks_by_property("struct_type", "if")
+        # for if_struct in if_structs:
+        #     struct_id = if_struct["cur_el_id"]
+        #     if_body = self._find_blocks_by_property("parent_id", struct_id)
+        #     else_body = self._find_blocks_by_property("parent_id", struct_id + "-else")
+        #     if not if_body:
+        #         continue
+        #     max_width_if_body = max(b["width"] for b in if_body)
+        #     base_x = if_struct["x"]
+        #     for b in if_body:
+        #         b["x"] = base_x + max_width_if_body
+        #     if else_body:
+        #         base_y = if_body[0]["y"]
+        #         for b in else_body:
+        #             b["y"] = base_y
+        #             b["x"] = base_x - max_width_if_body
+        #             base_y += 100
+
+        # --- inline _set_all_forbidden_areas() ---
+        for block in self._diagram["blocks"]:
+            x0 = block["x"] - block["width"] / 2
+            x1 = block["x"] + block["width"] / 2
+            y0 = block["y"] - block["height"] / 2
+            y1 = block["y"] + block["height"] / 2
+            self._forbidden_aria.append({"x0": x0, "x1": x1, "y0": y0, "y1": y1})
+
+        # --- вызов отрисовки стрелок (тоже один раз, но рекурсивный, оставляем как есть) ---
         self._connect_all_blocks_by_arrows()
 
         return self._diagram
 
     @staticmethod
     def build_from_programs_list(programs: list, pseudocode, diagram_class):
+        """Создаёт общую диаграмму из списка программ (например, функций)."""
         y = 0
         last_index = 0
         super_diagram = {
@@ -111,44 +131,50 @@ class BlockDiagram(ABC):
             )
             diagram = diagram.build()
 
-            # find last index
-            last_index = max([b["index"] for b in diagram["blocks"]]) + 1
+            # Вычисляем максимальный индекс для продолжения нумерации
+            last_index = max(b["index"] for b in diagram["blocks"]) + 1
 
             super_diagram["blocks"] += diagram["blocks"]
             super_diagram["arrows"] += diagram["arrows"]
             y += len(diagram["blocks"]) * diagram_class._blocks_indent
 
-            # delete last blocks and arrows, because of pythons vars are links xD.
+            # Очищаем временные данные (костыль для избежания ссылок)
             diagram_class._diagram["blocks"] = []
             diagram_class._diagram["arrows"] = []
 
         return super_diagram
 
     def debug(self) -> dict:
+        """Возвращает диаграмму и запретные зоны для отладки."""
         self.build()
         return {"diagram": self._diagram, "forb_area": self._forbidden_aria}
 
-    def _form_block(
-        self, text="", pos=None, cur_el_id="0", parent_id="0", block_type="none"
+    def _return_block(
+        self, text="", pos=None, parentIndex: list[int] | int = 1, block_type="none"
     ):
+        """Создаёт словарь блока."""
+        if isinstance(parentIndex, int):
+            parentIndex = [parentIndex]
         if pos is None:
             pos = {"x": 0, "y": 0}
         if block_type == "none":
             block_type = self._get_bd_type_of_line(text.strip().split("\n")[0])
+
         text = text.strip()
         code = text
         struct_type = self._get_struct_type(code)
         size = BlockDiagram._get_size_of_block(text.split("\n"))
+
         if block_type == "none":
             return
+
         text = self._to_pseudocode(text)
         if text.strip() == "":
             return
 
         block = {
             "code": code,
-            "cur_el_id": cur_el_id,
-            "parent_id": parent_id,
+            "parentIndex": parentIndex,
             "struct_type": struct_type,
             "x": pos["x"],
             "y": pos["y"],
@@ -163,38 +189,39 @@ class BlockDiagram(ABC):
             "isItalic": False,
             "textAlign": "center",
             "labelsPosition": 1,
+            "index": len(self._diagram["blocks"]),
         }
-
         return block
 
     @abstractmethod
+    def _get_bd_type_of_line(line: str) -> str:
+        """Возвращает тип блока для отображения на сайте."""
+        if line:
+            return "Блок"
+
+    # --- Абстрактные методы, переопределяемые в наследниках ---
+    @abstractmethod
     def _get_struct_type(line: str) -> str:
         """
-        It returns code-line type.
-        For example: “if a > 4" => 'if'
-
-        Args:
-            line: code line
-
-        Returns:
-            'if', 'else', 'elif', 'loop', 'function', 'output', 'block'
+        Определяет тип конструкции: 'if', 'else', 'elif', 'loop', 'function', 'output', 'block'.
         """
         if line:
             return "block"
 
     @staticmethod
     def _get_size_of_block(lines: list) -> dict:
+        """Вычисляет ширину и высоту блока по тексту."""
         height = len(lines) * 8
         width = 100
-
         for line in lines:
-            if type(line) == str:
+            if isinstance(line, str):
                 line = line.strip()
                 width = max(width, len(line) * 9)
-
         return {"width": max(100, width), "height": max(height, 40)}
 
+    # --- Работа с запретными зонами и путями ---
     def _is_point_free(self, position: dict) -> bool:
+        """Проверяет, свободна ли точка (не занята другим блоком)."""
         x = position["x"]
         y = position["y"]
         for pos in self._forbidden_aria:
@@ -205,6 +232,7 @@ class BlockDiagram(ABC):
         return True
 
     def _is_path_free(self, position: dict, coor="y") -> bool:
+        """Проверяет, свободен ли путь между двумя точками."""
         coor1 = position["start"]
         coor2 = position["end"]
 
@@ -223,94 +251,129 @@ class BlockDiagram(ABC):
                 return True
             else:
                 return False
-
             begin += 1
         return True
 
-    @abstractmethod
-    def _get_bd_type_of_line(line: str) -> str:
+    # --- Основной парсер дерева кода (рекурсивный) ---
+    def _add_blocks(
+        self,
+        code_tree: list,
+        current_parent: int = 0,
+    ) -> tuple[int, list]:
         """
-        It returns line type for BlockDiagram redactor.
-
-        Args:
-            line: code-line
-
-        Returns:
-            'Условие', 'none', 'Цикл for', 'Ввод / вывод', 'Начало / конец', 'Блок'
+        Рекурсивно обходит дерево.
+        Модифицирует self._diagram["blocks"] напрямую.
+        Возвращает индекс последнего добавленного в этой ветке блока.
         """
-        if line:
-            return "Блок"
-
-    def _set_forbidden_aria(self, position: dict, size: dict) -> None:
-        x0 = position["x"] - size["width"] / 2
-        x1 = position["x"] + size["width"] / 2
-        y0 = position["y"] - size["height"] / 2
-        y1 = position["y"] + size["height"] / 2
-        self._forbidden_aria.append({"x0": x0, "x1": x1, "y0": y0, "y1": y1})
-
-    def _set_all_forbidden_areas(self) -> None:
-        for block in self._diagram["blocks"]:
-            self._set_forbidden_aria(
-                {"x": block["x"], "y": block["y"]},
-                {"width": block["width"], "height": block["height"]},
-            )
-
-    def _add_blocks(self, code_tree: list, parent_id="0") -> list:
-        blocks = []
+        pending_merge = []
+        last_index = current_parent
 
         for code in code_tree:
-            cur_el_id = uuid.uuid1().hex
-            if type(code) == str:
+            if isinstance(code, str):
                 self._last_y += self._blocks_indent
-                block = self._form_block(
-                    code, {"x": 0, "y": self._last_y}, cur_el_id, parent_id
+                parent = pending_merge if pending_merge else last_index
+                # pending_merge.append(last_index)
+                # parent = pending_merge
+
+                new_block = self._return_block(
+                    code, {"x": 0, "y": self._last_y}, parent
                 )
-                if block is not None:
-                    blocks.append(block)
+                # ок, привязываем последний индекс, допустим произошел рекурсивный вызов
+
+                if new_block:
+                    self._diagram["blocks"].append(new_block)
+                    last_index = new_block["index"]
+                    pending_merge = []
                 else:
                     self._last_y -= self._blocks_indent
+
             else:
                 self._last_y += self._blocks_indent
                 key = list(code.keys())[0]
                 value = list(code.values())[0]
-                block = self._form_block(
-                    key, {"x": 0, "y": self._last_y}, cur_el_id, parent_id
-                )
-                if "if " in key:
-                    self._last_if_id_list.append(cur_el_id)
-                if block is not None and "elif" not in key:
-                    blocks.append(block)
-                    blocks += self._add_blocks(value, cur_el_id)
-                elif "else" == key.replace(":", "").strip():
-                    self._last_y -= self._blocks_indent
-                    blocks += self._add_blocks(
-                        value, self._last_if_id_list[-1] + "-else"
-                    )
-                    self._last_if_id_list.pop()
-                elif "elif" in key:
-                    self._last_y -= self._blocks_indent
-                    blocks += self._add_blocks(
-                        value, self._last_if_id_list[-1] + "-else"
-                    )
-                    self._last_if_id_list.pop()
-                else:
-                    self._last_y -= self._blocks_indent
-                    blocks += self._add_blocks(value, self._last_if_id_list[-1])
 
-        return blocks
+                if key.startswith("if "):
+                    # 1. Создаем if-блок
+                    if_block = self._return_block(
+                        key, {"x": 0, "y": self._last_y}, last_index
+                    )
+                    self._diagram["blocks"].append(if_block)
+
+                    # 2. Сохраняем в стек индекс условия
+                    self._last_if_id_list.append(if_block["index"])
+
+                    # 3. Рекурсивно заполняем тело IF, передавая ID условия как родителя
+                    last_index, inner_merge = self._add_blocks(value, if_block["index"])
+                    if inner_merge:
+                        pending_merge.extend(inner_merge)
+                    else:
+                        pending_merge.append(last_index)
+                    pending_merge.append(if_block["index"])
+
+                elif key.startswith("elif "):
+                    self._last_y -= self._blocks_indent
+                    # 1. Создаем elif-блок, привязывая к IF-условию
+                    elif_block = self._return_block(
+                        key, {"x": 0, "y": self._last_y}, self._last_if_id_list[-1]
+                    )
+                    self._diagram["blocks"].append(elif_block)
+
+                    # 2. Обновляем ID в стеке на текущий elif
+                    self._last_if_id_list[-1] = elif_block["index"]
+
+                    # 3. Рекурсивно заполняем тело ELIF
+                    last_index, inner_merge = self._add_blocks(value, elif_block["index"])
+                    if inner_merge:
+                        pending_merge.extend(inner_merge)
+                    else:
+                        pending_merge.append(last_index)                
+                elif "else:" in key:
+                    self._last_y -= self._blocks_indent
+                    # Рекурсивно заполняем тело ELSE, передавая ID условия из стека
+                    last_index, inner_merge = self._add_blocks(value, self._last_if_id_list[-1])
+                    if inner_merge:
+                        pending_merge.extend(inner_merge)
+                    else:
+                        pending_merge.append(last_index)
+                    self._last_if_id_list.pop()
+                elif "for " in key or "while " in key:
+                    self._last_y += self._blocks_indent
+                    loop_block = self._return_block(
+                        key, {"x": 0, "y": self._last_y}, last_index
+                    )
+
+                    self._diagram["blocks"].append(loop_block)
+                    # тело цикла
+                    last_index, inner_merge = self._add_blocks(value, loop_block["index"])
+                    pending_merge.append(loop_block["index"])
+                    # выход из цикла (false) – добавляем индекс цикла как родителя
+                    if inner_merge:
+        # Добавляем все концы ветвей, чтобы все они замыкались на цикл
+                        loop_block["parentIndex"].extend(inner_merge)
+                    else:
+                        # Добавляем просто последний блок тела
+                        loop_block["parentIndex"].append(last_index)
+                    # if inner_merge:
+                    #     pending_merge.extend(inner_merge)
+                    # else:
+                    #     pending_merge.append(last_index)
+                    # pending_merge.append(loop_block["index"])
+
+
+        self._final_merge = pending_merge
+        return last_index, pending_merge
 
     def _connect_same_lines_in_tree(self, code_tree: list) -> list:
+        """Склеивает строки одного типа в один блок (оптимизация)."""
         tree = []
         lines = ""
-
-        for i in range(len(code_tree)):
-            line = code_tree[i]
-            if type(line) == str:
+        for i, line in enumerate(code_tree):
+            if isinstance(line, str):
                 lines += line + "\n"
                 last_type = self._get_bd_type_of_line(line)
                 if i + 1 < len(code_tree):
                     next_line = code_tree[i + 1]
-                    if type(next_line) != str:
+                    if not isinstance(next_line, str):
                         tree.append(lines)
                         lines = ""
                     elif self._get_bd_type_of_line(next_line) not in [
@@ -331,18 +394,13 @@ class BlockDiagram(ABC):
                         )
                     }
                 )
-
         return tree
 
-    def _set_block_indexes(self) -> None:
-        count = self._start_block_index
-        for block in self._diagram["blocks"]:
-            block["index"] = count
-            count += 1
-
     def _to_pseudocode(self, lines: str) -> str:
+        """Преобразует строку кода в псевдокод."""
         return self._pseudocode.to_pseudocode(lines)
 
+    # --- Рисование стрелок ---
     def _draw_arrow(
         self,
         start_end_pos: dict,
@@ -350,6 +408,7 @@ class BlockDiagram(ABC):
         direction: dict,
         y_correction=0,
     ) -> None:
+        """Рисует одну стрелку между двумя блоками."""
         dirs = self._direction
         delta = self._last_arrow_pos_delta - 1
         arrow = {
@@ -366,58 +425,41 @@ class BlockDiagram(ABC):
         x2 = start_end_pos["end"]["x"]
         y2 = start_end_pos["end"]["y"]
 
-        # set direction coef
         x_direction_coef = 1
         if direction["start"] == dirs["LEFT"]:
             x_direction_coef = -1
 
-        # nested control struct body
+        # Случай: влево-вправо (ветвление)
         if direction["start"] == dirs["LEFT"] and direction["end"] == dirs["RIGHT"]:
-            # first node
             arrow["nodes"].append({"x": x1, "y": y1})
-
-            # look for free left node and set it
             while not self._is_path_free(
                 {"start": {"x": x1, "y": y1}, "end": {"x": x2, "y": y1}}, "x"
             ):
                 y1 += 50
-
-            # add correction
             y1 += y_correction - y1
-            # set node
             arrow["nodes"].append({"x": x1 + delta, "y": y1})
-
-            # look for free right node
             while not self._is_path_free(
                 {"start": {"x": x1, "y": y1}, "end": {"x": x1, "y": y2}}, "y"
             ):
                 x1 += 100
-
-            # set right and other nodes
             arrow["nodes"].append({"x": x1 + delta, "y": y1})
             arrow["nodes"].append({"x": x1 + delta, "y": y2})
             arrow["nodes"].append({"x": x2, "y": y2})
 
-        # loop body
+        # Случай: вниз-вправо (цикл)
         elif direction["start"] == dirs["DOWN"] and direction["end"] == dirs["RIGHT"]:
-            # first node
             arrow["nodes"].append({"x": x1, "y": y1})
-            # go down 50 for correct display
             y1 += 50
             arrow["nodes"].append({"x": x1, "y": y1})
-
-            # look for free node
             while not self._is_path_free(
                 {"start": {"x": x1, "y": y1}, "end": {"x": x1, "y": y2}}, "y"
             ):
                 x1 += 100 * x_direction_coef
-
-            # set nodes
             arrow["nodes"].append({"x": x1 + delta, "y": y1})
             arrow["nodes"].append({"x": x1 + delta, "y": y2})
             arrow["nodes"].append({"x": x2, "y": y2})
 
-        # other cases
+        # Остальные случаи (обычная стрелка вниз)
         else:
             arrow["nodes"].append({"x": x1, "y": y1})
             if not self._is_path_free(
@@ -427,7 +469,6 @@ class BlockDiagram(ABC):
                     {"start": {"x": x1, "y": y1}, "end": {"x": x1, "y": y2}}
                 ):
                     x1 += 30 * x_direction_coef
-
                 arrow["nodes"].append({"x": x1 + delta, "y": y1})
                 arrow["nodes"].append({"x": x1 + delta, "y": y2 - 40})
                 arrow["nodes"].append({"x": x2, "y": y2 - 40})
@@ -435,20 +476,16 @@ class BlockDiagram(ABC):
             else:
                 arrow["nodes"].append({"x": x2, "y": y2})
 
-        # add 1 to counts arr
+        # Заполнение счётчиков (всегда 1)
         for _ in arrow["nodes"]:
             arrow["counts"].append(1)
         self._last_arrow_pos_delta -= 1
         self._diagram["arrows"].append(arrow)
 
     def _connect_blocks(self, block1: dict, block2: dict, direction: dict) -> None:
-        # check struct type
+        """Соединяет два блока стрелкой (временное упрощение без y-коррекции)."""
         y_correction = 0
-        if block1["struct_type"] in ["if", "elif"]:
-            if_body = self._find_blocks_by_property("parent_id", block1["cur_el_id"])
-            y_correction = if_body[-1]["y"] + if_body[-1]["height"] / 2 + 30
-
-        # draw
+        # TODO: вычислить y_correction для условий через parentIndex
         self._draw_arrow(
             {
                 "start": {"y": block1["y"], "x": block1["x"]},
@@ -459,145 +496,262 @@ class BlockDiagram(ABC):
             y_correction,
         )
 
-    def _align_if_else_bodies(self) -> None:
-        if_structs = self._find_blocks_by_property("struct_type", "if")
-
-        for if_struct in if_structs:
-            struct_id = if_struct["cur_el_id"]
-
-            if_body = self._find_blocks_by_property("parent_id", struct_id)
-            else_body = self._find_blocks_by_property("parent_id", struct_id + "-else")
-            max_width_if_body = max([i["width"] for i in if_body])
-
-            base_x = if_struct["x"]
-            for block in if_body:
-                block["x"] = base_x + max_width_if_body
-
-            base_y = if_body[0]["y"]
-            for block in else_body:
-                block["y"] = base_y
-                block["x"] = base_x - max_width_if_body
-                base_y += 100
-
     def _find_blocks_by_property(
         self, block_property: str, value, required_field="", block_list=None
     ) -> list:
+        """Поиск блоков по значению свойства (например, parent_id)."""
         if block_list is None:
             block_list = []
         if not block_list:
             block_list = self._diagram["blocks"]
-        output = []
-
+        result = []
         for block in block_list:
-            if block[block_property] == value:
-                if required_field != "":
-                    output.append(block[required_field])
+            if block.get(block_property) == value:
+                if required_field:
+                    result.append(block[required_field])
                 else:
-                    output.append(block)
+                    result.append(block)
+        return result
 
-        return output
-
-    def _connect_all_blocks_by_arrows(self, parent_id="0") -> None:
-        blocks = self._find_blocks_by_property("parent_id", parent_id)
+    # --- Центральный метод связывания всех блоков стрелками ---
+    def _connect_all_blocks_by_arrows(self) -> None:
         dirs = self._direction
+        blocks = self._diagram["blocks"]
+        # сохраняем словарь, где можно по индексу обращаться к блоку, где ключ это сам индекс, а значение сам блок
+        block_map = {b["index"]: b for b in blocks}
 
-        for i in range(len(blocks)):
-            b_c = blocks[i]
-            if i + 1 <= len(blocks) - 1:
-                b_n = blocks[i + 1]
-            else:
-                b_n = None
-            struct_type = b_c["struct_type"]
-            cur_id = b_c["cur_el_id"]
-            if (struct_type == "block" or struct_type == "output") and b_n is not None:
-                self._connect_blocks(
-                    b_c, b_n, {"start": dirs["DOWN"], "end": dirs["UP"]}
-                )
-            else:
-                if struct_type == "loop":
-                    body = self._find_blocks_by_property("parent_id", cur_id)
-                    is_last_close_child_loop = body[-1]["struct_type"] == "loop"
+        # Собираем потомков для каждого управляющего родителя
+        # простыми словами находим детей родителя, где ключ - родитель, значение - дети (блок/слварь)
+        control_children = {}
+        for b in blocks:
+            # перебираем индексыы родителей внутри блока (напоминаю что у блока может быть несколько родителей)
+            for p in b.get("parentIndex", []):
+                # проверяем, есть ли индекс родителя в наших блоках и по значению индекса в словаре blockmap
+                # мы проверяем является ли наш родитель (родительский блок), if, elif, loop который мы перебираем из всех родителей
+                if p in block_map and block_map[p]["struct_type"] in ("if", "elif", "loop"):
+                    # затем сохраняем где ключ - родитель, значение - его потомки/дети которые хранятся в виде полноценных блоках
+                    control_children.setdefault(p, []).append(b)
+        # по итогу у нас block_map где содержатся индексы, и по индексам (ключу) можно обращаться к блокам
+        # и control_children, блоки которые содержат индексы (блоков которые являются родителями и которые являются if, elif или циклом), а затем сохраняются все блоки потомков
 
-                    # ИСПРАВЛЕНИЕ: пускаем "да" направо (dirs['RIGHT']), чтобы совпало с разметкой сайта
-                    self._connect_blocks(
-                        b_c, body[0], {"start": dirs["RIGHT"], "end": dirs["UP"]}
-                    )
-                    self._connect_all_blocks_by_arrows(cur_id)
-                    if b_n is not None:
-                        # "нет" пускаем налево (dirs['LEFT']) на выход из цикла
-                        self._connect_blocks(
-                            b_c, b_n, {"start": dirs["LEFT"], "end": dirs["UP"]}
-                        )
+        # Сортируем потомков по индексу
+        for p in control_children:
+            # от меньшего к большему
+            control_children[p].sort(key=lambda x: x["index"])
 
-                    if is_last_close_child_loop:
-                        self._connect_blocks(
-                            body[-1], b_c, {"start": dirs["LEFT"], "end": dirs["RIGHT"]}
-                        )
+        # Рисуем стрелки
+        
+        # [ 3, 4 , 6 , 7]
+        # если в 3 лежит цикл, то остальные блоки надо соединять до тех пор пора паренты совпадают, т.е. замыкать
+        for child in blocks:
+            # last_loop = None
+            # перебирая блоки, мы еще перебираем индексы (родителей может быть несколько)
+            parents = child.get("parentIndex", [])
+            for p_id in parents:
+                # если такого индекса не существует, то скипаем итерацию
+                if p_id not in block_map:
+                    continue
+                # получаем родительский блок
+                parent = block_map[p_id]
+                # получаем его тип
+                p_type = parent["struct_type"]
+                # нам нужно сделать проверку
+                # если родительский блок являтся обычным блоком или блоком ввода вывода нашего текущего блока, то просто линейно соединяем
 
-                    for item in self._find_farthest_children([b_c]):
-                        if item["struct_type"] == "if":
-                            self._connect_blocks(
-                                item, b_c, {"start": dirs["LEFT"], "end": dirs["RIGHT"]}
-                            )
-                        elif not is_last_close_child_loop:
-                            # Возврат из конца тела цикла обратно в ромб
-                            self._connect_blocks(
-                                item, b_c, {"start": dirs["DOWN"], "end": dirs["UP"]}
-                            )
+                # Линейная связь
+                if p_type in ("block", "i/o"):
+    # Если текущий блок — цикл, а родитель — обычный блок,
+                    # то замыкаем
+                    # если текущий блок (цикл) к примеру с индексом 2, а родительский блок (обычный блок) с индексом 1, значит 2 - 1 > 1 ложь
+                    # если текущий блок цикл к примеру с индексом 2, а родительский блок (обычный блок) с индексом 3, значит 2 - 3 > 1 ложь
+                    # значит придумаем свою формулу для определения
+                    # 2 - 1 < 1 - ложь, 2 - 3 < 1 правда
+                    if child["struct_type"] == "loop" and child["index"] - parent["index"] < 1:
+                        self._connect_blocks(parent, child, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
+                    else:
+                        self._connect_blocks(parent, child, {"start": dirs["DOWN"], "end": dirs["UP"]})
+                # Управляющая связь (if/elif/loop)
+                # если родительский блок является циклом или условием, то мы соединяем от стрелки "да", если родительский блок находится далеко от текущего блока, то от стрелки "нет"
+                elif p_type in ("if", "elif", "loop"): 
+                    # p_id это индекс родителя, мы получаем список блоков потомков if elif else
+                    # определяем откуда рисовать стрелку (от "да" или "нет")
+                    if child["index"] - parent["index"] > 1:          # true-ветка
+                        self._connect_blocks(parent, child, {"start": dirs["LEFT"], "end": dirs["UP"]})
+                    else:        # false-ветка
+                        if child["struct_type"] != "loop" or p_type not in ("if", "elif"):
+                            self._connect_blocks(parent, child, {"start": dirs["RIGHT"], "end": dirs["UP"]})
+        
+                        #
+        # Замыкание циклов
+        # for b in blocks:
+        #     if b["struct_type"] == "loop":
+        #         # получаем все блоки тела цикла
+        #         childrens = control_children.get(b["index"], [])
+        #         for children in childrens:
+                    
+                #     if children["struct_type"] == "loop":
+                #         pprint(b)
+                #         print("\n<", "-"*100, ">")
+                #         pprint(children)
+                #         print("\n<", "-"*100, ">")
+                #
+                #         self._connect_blocks(children, b, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
+                #
+                #     elif children["struct_type"] in ("i/o", "block") and children["index"] - children["parentIndex"][0] > 1:
+                #         # pprint(b)
+                #         # print("\n<", "-"*100, ">")
+                #         # pprint(children)
+                #         # print("\n<", "-"*100, ">")
+                #         last_index_in_body_loop = children["index"] - 1
+                #         current = block_map[last_index_in_body_loop]                        # нам нужно скользить по родителям и найти loop
+                #         while current is not None and current["struct_type"] != "loop":
+                #         # Берём первого родителя (любой путь приведёт к циклу)
+                #             if current["parentIndex"]:
+                #                 parent_id = current["parentIndex"][0]
+                #                 current = block_map.get(parent_id)
+                #                 if cu
+                #             else:
+                #                 current = None
+                #         if current is not None:
+                #             self._connect_blocks(block_map[last_index_in_body_loop], current, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
+                #
+                #     elif children["struct_type"] in ("i/o", "block") and block_map[children["parentIndex"][0]]["struct_type"] == "loop":
+                #         self._connect_blocks(children, b, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
+                #
+                #
+                #
+                #
+                #
+                #
+                #
+                #
+                #
+                # pprint(b)
+                # print("\n<", "-"*100, ">")
+                # pprint(childrens)
+                # print("\n<", "-"*100, ">")
+                #############################
+                # если блоков больше двух
+                # if len(children) >= 2:
+                #     # из стрелки "да"
+                #     body_start = children[0]
+                #     # ведёт из стрелки "нет"
+                #     loop_exit = children[1]
+                #     body_end = None
+                #     for blk in blocks:
+                #         idx = blk["index"]
+                #         if body_start["index"] <= idx < loop_exit["index"]:
+                #             body_end = blk
+                #     if body_end:
+                #         pprint(children)
+                #         self._connect_blocks(body_end, b, {"start": dirs["RIGHT"], "end": dirs["UP"]})                        
+                #
 
-                if struct_type == "if":
-                    if_body = self._find_blocks_by_property("parent_id", cur_id)
-                    else_body = self._find_blocks_by_property(
-                        "parent_id", cur_id + "-else"
-                    )
+                        
+                            
 
-                    if len(else_body) > 0:
-                        self._connect_blocks(
-                            b_c,
-                            else_body[0],
-                            {"start": dirs["LEFT"], "end": dirs["UP"]},
-                        )
-                    self._connect_blocks(
-                        b_c, if_body[0], {"start": dirs["RIGHT"], "end": dirs["UP"]}
-                    )
-
-                    self._connect_all_blocks_by_arrows(cur_id)
-                    self._connect_all_blocks_by_arrows(cur_id + "-else")
-
-                    for item in self._find_farthest_children([b_c]):
-                        if item == b_c and b_n is not None:
-                            self._connect_blocks(
-                                item, b_n, {"start": dirs["LEFT"], "end": dirs["UP"]}
-                            )
-                        elif b_n is not None:
-                            self._connect_blocks(
-                                item, b_n, {"start": dirs["DOWN"], "end": dirs["UP"]}
-                            )
-
+            
+             
+            
+        # Словарь для мгновенного доступа к блоку по индексу
+        # block_map = {b["index"]: b for b in blocks}
+        #
+        # # Шаг 1: Для каждого управляющего блока собираем всех его потомков.
+        # # Потомки — это блоки, в parentIndex которых есть индекс данного управляющего блока.
+        # control_children = {}  # key = индекс управляющего блока, value = список потомков
+        # for b in blocks:
+        #     for p in b.get("parentIndex", []):
+        #         if p in block_map:
+        #             p_block = block_map[p]
+        #             if p_block["struct_type"] in ("if", "elif", "loop"):
+        #                 control_children.setdefault(p, []).append(b)
+        #
+        # # Сортируем потомков по индексу (порядок в массиве blocks)
+        # for p in control_children:
+        #     control_children[p].sort(key=lambda x: x["index"])
+        #
+        # # Шаг 2: Отрисовка стрелок от родителей к потомкам
+        # for child in blocks:
+        #     for p_id in child.get("parentIndex", []):
+        #         # if (
+        #         #     p_id < 1
+        #         # ):  # или p_id < 0, если нумерация с 0, но у тебя индексы начинаются с 1
+        #         #     continue
+        #         if p_id not in block_map:
+        #             continue
+        #         parent = block_map[p_id]
+        #         p_type = parent["struct_type"]
+        #
+        #         # 2.1 Линейная связь (обычный блок -> следующий)
+        #         if p_type in ("block", "output"):
+        #             self._connect_blocks(
+        #                 parent, child, {"start": dirs["DOWN"], "end": dirs["UP"]}
+        #             )
+        #
+        #         # 2.2 Управляющая связь (ветвление или цикл)
+        #         elif p_type in ("if", "elif", "loop"):
+        #             siblings = control_children.get(p_id, [])
+        #             if child not in siblings:
+        #                 continue
+        #             # Определяем, который по счёту этот потомок у родителя
+        #             position = siblings.index(child)
+        #
+        #             if position == 0:
+        #                 # Первый потомок – истинная ветвь (true)
+        #                 self._connect_blocks(
+        #                     parent, child, {"start": dirs["RIGHT"], "end": dirs["UP"]}
+        #                 )
+        #             elif position == 1:
+        #                 # Второй потомок – ложная ветвь (false)
+        #                 self._connect_blocks(
+        #                     parent, child, {"start": dirs["LEFT"], "end": dirs["UP"]}
+        #                 )
+        #             # Третий и далее потомки в корректной нотации не возникают
+        #
+        # # Шаг 3: Замыкание циклов
+        # for b in blocks:
+        #     if b["struct_type"] == "loop":
+        #         loop_idx = b["index"]
+        #         children = control_children.get(loop_idx, [])
+        #         if len(children) >= 2:
+        #             body_start = children[0]  # первый блок тела цикла
+        #             loop_exit = children[1]  # блок, следующий за циклом (выход)
+        #
+        #             # Найти последний блок тела цикла как блок с максимальным индексом,
+        #             # который расположен после начала тела, но до выхода.
+        #             body_end = None
+        #             for blk in blocks:
+        #                 idx = blk["index"]
+        #                 if body_start["index"] <= idx < loop_exit["index"]:
+        #                     if body_end is None or idx > body_end["index"]:
+        #                         body_end = blk
+        #
+        #             if body_end:
+        #                 self._connect_blocks(
+        #                     body_end, b, {"start": dirs["LEFT"], "end": dirs["RIGHT"]}
+        #                 )
+        #
     def _find_farthest_children(self, blocks: list) -> list:
+        """Находит самые дальние дочерние блоки (для замыкания стрелок)."""
         children = []
-        if len(blocks) == 0:
-            return []
-
+        if not blocks:
+            return children
         for block in blocks:
             struct_type = block["struct_type"]
             body = self._find_blocks_by_property("parent_id", block["cur_el_id"])
             else_body = self._find_blocks_by_property(
                 "parent_id", block["cur_el_id"] + "-else"
             )
-
             if struct_type == "loop":
-                if len(body) > 0:
+                if body:
                     children += self._find_farthest_children([body[-1]])
             elif struct_type == "if":
-                if len(body) > 0:
+                if body:
                     children += self._find_farthest_children([body[-1]])
-                if len(else_body) > 0:
+                if else_body:
                     children += self._find_farthest_children([else_body[-1]])
                 else:
-                    children += [block]
-
+                    children.append(block)
             else:
                 children.append(block)
-
         return children
