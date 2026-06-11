@@ -178,6 +178,7 @@ class PyPreprocessor(Preprocessor):
             line[0:2] == "if"
             or line[0:3] == "for"
             or line[0:5] == "while"
+            or line[0:4] == "elif"
             or line[0:4] == "else"
             or line[0:4] == "def "
         )
