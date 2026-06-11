@@ -19,8 +19,8 @@ class Py2BlockDiagram(BlockDiagram):
         elif line[0:4] == "def ":
             return "function"
         else:
-            if "print" in line:
-                return "output"
+            if ("print" in line) or ("input" in line):
+                return "i/o"
             else:
                 return "block"
 
