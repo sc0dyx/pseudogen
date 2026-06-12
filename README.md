@@ -58,6 +58,7 @@ pseudogen -i лаба.cpp -o schema.json -t blockscheme
 ❌ Нет поддержи do while в с++
 
 ❌ Нет поддержки функций
+
 ---
 
 ## 🚀 Как получить готовую картинку?
