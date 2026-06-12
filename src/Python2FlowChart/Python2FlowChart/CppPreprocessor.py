@@ -1,61 +1,147 @@
 import re
+from .PyChart.PyChart import Preprocessor
 
 
-class CppPreprocessor:
+class CppPreprocessor(Preprocessor):
     def __init__(self, f) -> None:
-        # Читаем файл в массив строк
         self._file = f.readlines() if hasattr(f, "readlines") else f
         self._parsed_code = []
         self._serealized_code = []
         self._parse()
 
     def _parse(self) -> None:
+        # 1. Склеиваем весь файл в одну строку
+        code = "".join(self._file) if isinstance(self._file, list) else self._file
+
+        # 2. Вычищаем директивы и комментарии.
+        # Используем (?:\n|$) чтобы корректно обрабатывать конец файла
+        code = re.sub(r"#.*?(?:\n|$)", " ", code)
+        code = re.sub(r"//.*?(?:\n|$)", " ", code)
+        code = re.sub(r"/\*.*?\*/", " ", code, flags=re.DOTALL)
+
+        # 3. Уничтожаем лишние пробелы и переносы — в C++ они не имеют смысла
+        code = re.sub(r"\s+", " ", code).strip()
+
+        self._parsed_code = []
+        i = 0
         level = 0
-        for line in self._file:
-            # 1. Удаляем комментарии C++
-            line = re.sub(r"//.*", "", line)
-            line = re.sub(r"/\*.*?\*/", "", line)
-            striped = line.strip()
+        force_indent = []  # Стек для отслеживания однострочных тел (без скобок)
 
-            # 2. Удаляем инклуды, пространства имен, int main() и return 0
-            if (
-                not striped
-                or striped.startswith("#")
-                or striped.startswith("using")
-                or "main(" in striped
-                or "return 0" in striped
-                or striped == "return;"
-            ):
-                # Следим за скобками, даже если саму строку с main() или return выкидываем
-                if "{" in striped:
-                    level += 1
-                if "}" in striped:
-                    level = max(0, level - striped.count("}"))
+        while i < len(code):
+            if code[i] == " ":
+                i += 1
                 continue
 
-            # Пропускаем одиночные фигурные скобки
-            if striped == "{" or striped == "}" or striped == "};":
-                if striped == "{":
-                    level += 1
-                elif striped == "}" or striped == "};":
-                    level = max(0, level - 1)
+            # Закрытие обычного блока
+            if code[i] == "}":
+                if level > 0:
+                    level -= 1
+                i += 1
+                # Сбрасываем висящие однострочные отступы, если блок закрылся
+                while force_indent and force_indent[-1] >= level:
+                    force_indent.pop()
                 continue
 
-            if "}" in striped:
-                level = max(0, level - striped.count("}"))
-                striped = striped.replace("}", "").strip()
+            # Проверяем управляющие конструкции и функции (они задают скоуп)
+            ctrl_match = re.match(
+                r"^(else\s+if|if|while|for|else|switch|do)\b", code[i:]
+            )
+            func_match = re.match(
+                r"^(?:inline\s+)?(?:void|int|float|double|char|bool|string|auto)\s+\w+\s*\(",
+                code[i:],
+            )
 
-            pseudo_line = "    " * level + striped
-            if pseudo_line.endswith(";"):
-                pseudo_line = pseudo_line[:-1]
+            if ctrl_match or func_match:
+                if ctrl_match:
+                    keyword = ctrl_match.group(1)
+                    i += len(keyword)
+                else:
+                    keyword = ""
 
-            if striped:
-                self._parsed_code.append(pseudo_line)
+                stmt = keyword
 
-            if "{" in striped:
-                level += 1
+                # Если это не else/do, собираем условие целиком с учетом вложенных круглых скобок
+                if keyword not in ("else", "do"):
+                    while i < len(code) and code[i] != "(":
+                        stmt += code[i]
+                        i += 1
+                    if i < len(code):
+                        start_paren = i
+                        paren_count = 1
+                        i += 1
+                        while i < len(code) and paren_count > 0:
+                            if code[i] == "(":
+                                paren_count += 1
+                            elif code[i] == ")":
+                                paren_count -= 1
+                            i += 1
+                        stmt += code[start_paren:i]
 
-        # Сериализуем дерево
+                stmt = stmt.strip()
+                if stmt.startswith("else if"):
+                    # Отрезаем "else if" и приклеиваем "elif " (с пробелом для твоего .startswith("elif "))
+                    stmt = "elif " + stmt[7:].strip()
+                elif stmt == "else":
+                    # Добавляем двоеточие для совместимости с "else:" in key
+                    stmt = "else:"
+                is_main = "main(" in stmt
+
+                # Добавляем в AST всё, кроме сигнатуры main()
+                if not is_main:
+                    self._parsed_code.append("    " * level + stmt)
+
+                # Проверяем, есть ли фигурные скобки (блок) или тело будет однострочным
+                while i < len(code) and code[i] == " ":
+                    i += 1
+
+                if i < len(code) and code[i] == "{":
+                    i += 1
+                    if not is_main:
+                        level += 1
+                elif not is_main:
+                    # Фигурных скобок нет -> следующее выражение до ';' будет телом
+                    level += 1
+                    force_indent.append(level)
+                continue
+
+            # Если мы здесь, значит это обычное выражение, парсим до ';'
+            start_stmt = i
+            brace_count = 0
+            paren_count = 0
+
+            while i < len(code):
+                if code[i] == "{":
+                    brace_count += 1
+                elif code[i] == "}":
+                    if brace_count > 0:
+                        brace_count -= 1
+                    else:
+                        break  # Встретили конец чужого блока
+                elif code[i] == "(":
+                    paren_count += 1
+                elif code[i] == ")":
+                    if paren_count > 0:
+                        paren_count -= 1
+                elif code[i] == ";" and brace_count == 0 and paren_count == 0:
+                    i += 1
+                    break
+                i += 1
+
+            stmt = code[start_stmt:i].strip()
+            if stmt:
+                stmt = stmt.rstrip(";").strip()
+                # Игнорируем мусорные строки, чтобы они не лезли в блок-схемы
+                if not (
+                    stmt.startswith("using") or stmt == "return 0" or stmt == "return"
+                ):
+                    self._parsed_code.append("    " * level + stmt)
+
+            # Как только распарсили одно полноценное выражение, снимаем однострочный отступ
+            while force_indent and force_indent[-1] == level:
+                force_indent.pop()
+                level -= 1
+
+        # Собираем итоговое дерево
         self._serealized_code = self._get_serealized_code(self._parsed_code)
 
     def _get_serealized_code(self, code: list) -> list:
@@ -123,5 +209,16 @@ class CppPreprocessor:
             or line.startswith("while")
             or line.startswith("else")
             or line.startswith("switch")
+            or line.startswith("do")
             or is_cpp_function
         )
+
+    def _cut_functions(self, serealized_code):
+        return []
+
+    def _get_function_name(self, line):
+        return ""
+
+    def _get_fun_args(self, line, fun_name=""):
+        return []
+
