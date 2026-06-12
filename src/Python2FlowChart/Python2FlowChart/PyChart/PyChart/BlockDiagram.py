@@ -293,9 +293,11 @@ class BlockDiagram(ABC):
                 value = list(code.values())[0]
 
                 if key.startswith("if "):
+                    parent_for_if = pending_merge if pending_merge else last_index
+                    pending_merge = []
                     # 1. Создаем if-блок
                     if_block = self._return_block(
-                        key, {"x": 0, "y": self._last_y}, last_index
+                        key, {"x": 0, "y": self._last_y}, parent_for_if
                     )
                     self._diagram["blocks"].append(if_block)
 
@@ -304,11 +306,11 @@ class BlockDiagram(ABC):
 
                     # 3. Рекурсивно заполняем тело IF, передавая ID условия как родителя
                     last_index, inner_merge = self._add_blocks(value, if_block["index"])
+                    pending_merge.append(if_block["index"])
                     if inner_merge:
                         pending_merge.extend(inner_merge)
                     else:
                         pending_merge.append(last_index)
-                    pending_merge.append(if_block["index"])
 
                 elif key.startswith("elif "):
                     self._last_y -= self._blocks_indent
@@ -318,19 +320,30 @@ class BlockDiagram(ABC):
                     )
                     self._diagram["blocks"].append(elif_block)
 
+                    cond_idx = self._last_if_id_list[-1]
+                    if cond_idx in pending_merge:
+                        pending_merge.remove(cond_idx)
+
                     # 2. Обновляем ID в стеке на текущий elif
                     self._last_if_id_list[-1] = elif_block["index"]
 
                     # 3. Рекурсивно заполняем тело ELIF
-                    last_index, inner_merge = self._add_blocks(value, elif_block["index"])
+                    last_index, inner_merge = self._add_blocks(
+                        value, elif_block["index"]
+                    )
                     if inner_merge:
                         pending_merge.extend(inner_merge)
                     else:
-                        pending_merge.append(last_index)                
+                        pending_merge.append(last_index)
                 elif "else:" in key:
                     self._last_y -= self._blocks_indent
                     # Рекурсивно заполняем тело ELSE, передавая ID условия из стека
-                    last_index, inner_merge = self._add_blocks(value, self._last_if_id_list[-1])
+                    last_index, inner_merge = self._add_blocks(
+                        value, self._last_if_id_list[-1]
+                    )
+                    cond_idx = self._last_if_id_list[-1]
+                    if cond_idx in pending_merge:
+                        pending_merge.remove(cond_idx)
                     if inner_merge:
                         pending_merge.extend(inner_merge)
                     else:
@@ -338,17 +351,22 @@ class BlockDiagram(ABC):
                     self._last_if_id_list.pop()
                 elif "for " in key or "while " in key:
                     self._last_y += self._blocks_indent
+                    pending_merge = []
+
+                    parent_for_loop = pending_merge if pending_merge else last_index
                     loop_block = self._return_block(
-                        key, {"x": 0, "y": self._last_y}, last_index
+                        key, {"x": 0, "y": self._last_y}, parent_for_loop
                     )
 
                     self._diagram["blocks"].append(loop_block)
                     # тело цикла
-                    last_index, inner_merge = self._add_blocks(value, loop_block["index"])
+                    last_index, inner_merge = self._add_blocks(
+                        value, loop_block["index"]
+                    )
                     pending_merge.append(loop_block["index"])
                     # выход из цикла (false) – добавляем индекс цикла как родителя
                     if inner_merge:
-        # Добавляем все концы ветвей, чтобы все они замыкались на цикл
+                        # Добавляем все концы ветвей, чтобы все они замыкались на цикл
                         loop_block["parentIndex"].extend(inner_merge)
                     else:
                         # Добавляем просто последний блок тела
@@ -358,7 +376,6 @@ class BlockDiagram(ABC):
                     # else:
                     #     pending_merge.append(last_index)
                     # pending_merge.append(loop_block["index"])
-
 
         self._final_merge = pending_merge
         return last_index, pending_merge
@@ -528,7 +545,11 @@ class BlockDiagram(ABC):
             for p in b.get("parentIndex", []):
                 # проверяем, есть ли индекс родителя в наших блоках и по значению индекса в словаре blockmap
                 # мы проверяем является ли наш родитель (родительский блок), if, elif, loop который мы перебираем из всех родителей
-                if p in block_map and block_map[p]["struct_type"] in ("if", "elif", "loop"):
+                if p in block_map and block_map[p]["struct_type"] in (
+                    "if",
+                    "elif",
+                    "loop",
+                ):
                     # затем сохраняем где ключ - родитель, значение - его потомки/дети которые хранятся в виде полноценных блоках
                     control_children.setdefault(p, []).append(b)
         # по итогу у нас block_map где содержатся индексы, и по индексам (ключу) можно обращаться к блокам
@@ -540,7 +561,7 @@ class BlockDiagram(ABC):
             control_children[p].sort(key=lambda x: x["index"])
 
         # Рисуем стрелки
-        
+
         # [ 3, 4 , 6 , 7]
         # если в 3 лежит цикл, то остальные блоки надо соединять до тех пор пора паренты совпадают, т.е. замыкать
         for child in blocks:
@@ -560,177 +581,48 @@ class BlockDiagram(ABC):
 
                 # Линейная связь
                 if p_type in ("block", "i/o"):
-    # Если текущий блок — цикл, а родитель — обычный блок,
+                    # Если текущий блок — цикл, а родитель — обычный блок,
                     # то замыкаем
                     # если текущий блок (цикл) к примеру с индексом 2, а родительский блок (обычный блок) с индексом 1, значит 2 - 1 > 1 ложь
                     # если текущий блок цикл к примеру с индексом 2, а родительский блок (обычный блок) с индексом 3, значит 2 - 3 > 1 ложь
                     # значит придумаем свою формулу для определения
                     # 2 - 1 < 1 - ложь, 2 - 3 < 1 правда
-                    if child["struct_type"] == "loop" and child["index"] - parent["index"] < 1:
-                        self._connect_blocks(parent, child, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
+                    if (
+                        child["struct_type"] == "loop"
+                        and child["index"] - parent["index"] < 0
+                    ):
+                        self._connect_blocks(
+                            parent, child, {"start": dirs["LEFT"], "end": dirs["DOWN"]}
+                        )
                     else:
-                        self._connect_blocks(parent, child, {"start": dirs["DOWN"], "end": dirs["UP"]})
+                        self._connect_blocks(
+                            parent, child, {"start": dirs["DOWN"], "end": dirs["UP"]}
+                        )
                 # Управляющая связь (if/elif/loop)
                 # если родительский блок является циклом или условием, то мы соединяем от стрелки "да", если родительский блок находится далеко от текущего блока, то от стрелки "нет"
-                elif p_type in ("if", "elif", "loop"): 
+                elif p_type in ("if", "elif", "loop"):
                     # p_id это индекс родителя, мы получаем список блоков потомков if elif else
                     # определяем откуда рисовать стрелку (от "да" или "нет")
-                    if child["index"] - parent["index"] > 1:          # true-ветка
-                        self._connect_blocks(parent, child, {"start": dirs["LEFT"], "end": dirs["UP"]})
-                    else:        # false-ветка
-                        if child["struct_type"] != "loop" or p_type not in ("if", "elif"):
-                            self._connect_blocks(parent, child, {"start": dirs["RIGHT"], "end": dirs["UP"]})
-        
+                    if child["index"] - parent["index"] > 1:  # false ветка
+                        self._connect_blocks(
+                            parent, child, {"start": dirs["LEFT"], "end": dirs["UP"]}
+                        )
+                    elif (
+                        child["struct_type"] == "loop"
+                        and child["index"] - parent["index"] < 0
+                    ):  # если текущий блок цикл и родитель тоже цикл, то его false ветка будет ввести слева вниз, также делаем проверку на то, что родительский блок находится ниже на плоскости
+                        self._connect_blocks(
+                            parent, child, {"start": dirs["LEFT"], "end": dirs["DOWN"]}
+                        )
+                    else:  # true ветка
+                        self._connect_blocks(
+                            parent,
+                            child,
+                            {"start": dirs["RIGHT"], "end": dirs["UP"]},
+                        )
+
                         #
-        # Замыкание циклов
-        # for b in blocks:
-        #     if b["struct_type"] == "loop":
-        #         # получаем все блоки тела цикла
-        #         childrens = control_children.get(b["index"], [])
-        #         for children in childrens:
-                    
-                #     if children["struct_type"] == "loop":
-                #         pprint(b)
-                #         print("\n<", "-"*100, ">")
-                #         pprint(children)
-                #         print("\n<", "-"*100, ">")
-                #
-                #         self._connect_blocks(children, b, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
-                #
-                #     elif children["struct_type"] in ("i/o", "block") and children["index"] - children["parentIndex"][0] > 1:
-                #         # pprint(b)
-                #         # print("\n<", "-"*100, ">")
-                #         # pprint(children)
-                #         # print("\n<", "-"*100, ">")
-                #         last_index_in_body_loop = children["index"] - 1
-                #         current = block_map[last_index_in_body_loop]                        # нам нужно скользить по родителям и найти loop
-                #         while current is not None and current["struct_type"] != "loop":
-                #         # Берём первого родителя (любой путь приведёт к циклу)
-                #             if current["parentIndex"]:
-                #                 parent_id = current["parentIndex"][0]
-                #                 current = block_map.get(parent_id)
-                #                 if cu
-                #             else:
-                #                 current = None
-                #         if current is not None:
-                #             self._connect_blocks(block_map[last_index_in_body_loop], current, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
-                #
-                #     elif children["struct_type"] in ("i/o", "block") and block_map[children["parentIndex"][0]]["struct_type"] == "loop":
-                #         self._connect_blocks(children, b, {"start": dirs["LEFT"], "end": dirs["DOWN"]})
-                #
-                #
-                #
-                #
-                #
-                #
-                #
-                #
-                #
-                # pprint(b)
-                # print("\n<", "-"*100, ">")
-                # pprint(childrens)
-                # print("\n<", "-"*100, ">")
-                #############################
-                # если блоков больше двух
-                # if len(children) >= 2:
-                #     # из стрелки "да"
-                #     body_start = children[0]
-                #     # ведёт из стрелки "нет"
-                #     loop_exit = children[1]
-                #     body_end = None
-                #     for blk in blocks:
-                #         idx = blk["index"]
-                #         if body_start["index"] <= idx < loop_exit["index"]:
-                #             body_end = blk
-                #     if body_end:
-                #         pprint(children)
-                #         self._connect_blocks(body_end, b, {"start": dirs["RIGHT"], "end": dirs["UP"]})                        
-                #
 
-                        
-                            
-
-            
-             
-            
-        # Словарь для мгновенного доступа к блоку по индексу
-        # block_map = {b["index"]: b for b in blocks}
-        #
-        # # Шаг 1: Для каждого управляющего блока собираем всех его потомков.
-        # # Потомки — это блоки, в parentIndex которых есть индекс данного управляющего блока.
-        # control_children = {}  # key = индекс управляющего блока, value = список потомков
-        # for b in blocks:
-        #     for p in b.get("parentIndex", []):
-        #         if p in block_map:
-        #             p_block = block_map[p]
-        #             if p_block["struct_type"] in ("if", "elif", "loop"):
-        #                 control_children.setdefault(p, []).append(b)
-        #
-        # # Сортируем потомков по индексу (порядок в массиве blocks)
-        # for p in control_children:
-        #     control_children[p].sort(key=lambda x: x["index"])
-        #
-        # # Шаг 2: Отрисовка стрелок от родителей к потомкам
-        # for child in blocks:
-        #     for p_id in child.get("parentIndex", []):
-        #         # if (
-        #         #     p_id < 1
-        #         # ):  # или p_id < 0, если нумерация с 0, но у тебя индексы начинаются с 1
-        #         #     continue
-        #         if p_id not in block_map:
-        #             continue
-        #         parent = block_map[p_id]
-        #         p_type = parent["struct_type"]
-        #
-        #         # 2.1 Линейная связь (обычный блок -> следующий)
-        #         if p_type in ("block", "output"):
-        #             self._connect_blocks(
-        #                 parent, child, {"start": dirs["DOWN"], "end": dirs["UP"]}
-        #             )
-        #
-        #         # 2.2 Управляющая связь (ветвление или цикл)
-        #         elif p_type in ("if", "elif", "loop"):
-        #             siblings = control_children.get(p_id, [])
-        #             if child not in siblings:
-        #                 continue
-        #             # Определяем, который по счёту этот потомок у родителя
-        #             position = siblings.index(child)
-        #
-        #             if position == 0:
-        #                 # Первый потомок – истинная ветвь (true)
-        #                 self._connect_blocks(
-        #                     parent, child, {"start": dirs["RIGHT"], "end": dirs["UP"]}
-        #                 )
-        #             elif position == 1:
-        #                 # Второй потомок – ложная ветвь (false)
-        #                 self._connect_blocks(
-        #                     parent, child, {"start": dirs["LEFT"], "end": dirs["UP"]}
-        #                 )
-        #             # Третий и далее потомки в корректной нотации не возникают
-        #
-        # # Шаг 3: Замыкание циклов
-        # for b in blocks:
-        #     if b["struct_type"] == "loop":
-        #         loop_idx = b["index"]
-        #         children = control_children.get(loop_idx, [])
-        #         if len(children) >= 2:
-        #             body_start = children[0]  # первый блок тела цикла
-        #             loop_exit = children[1]  # блок, следующий за циклом (выход)
-        #
-        #             # Найти последний блок тела цикла как блок с максимальным индексом,
-        #             # который расположен после начала тела, но до выхода.
-        #             body_end = None
-        #             for blk in blocks:
-        #                 idx = blk["index"]
-        #                 if body_start["index"] <= idx < loop_exit["index"]:
-        #                     if body_end is None or idx > body_end["index"]:
-        #                         body_end = blk
-        #
-        #             if body_end:
-        #                 self._connect_blocks(
-        #                     body_end, b, {"start": dirs["LEFT"], "end": dirs["RIGHT"]}
-        #                 )
-        #
     def _find_farthest_children(self, blocks: list) -> list:
         """Находит самые дальние дочерние блоки (для замыкания стрелок)."""
         children = []
