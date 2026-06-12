@@ -15,9 +15,11 @@
 ## 🛠 Установка и Запуск
 
 ```bash
-git clone https://github.com/sc0dyx/pseudogen.git
-cd pseudogen
-pip install -e .
+pip install git+https://github.com/sc0dyx/pseudogen.git
+```
+Или другую версию (которую вам надо)
+```bash
+pip install git+https://github.com/sc0dyx/pseudogen.git@0.2.2
 ```
 
 ### 1. Генерация текстового псевдокода
