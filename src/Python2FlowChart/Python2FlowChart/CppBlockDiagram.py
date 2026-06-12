@@ -5,8 +5,6 @@ class CppBlockDiagram(BlockDiagram):
     @staticmethod
     def _get_struct_type(line: str) -> str:
         line = line.strip()
-
-        # C++ ключевые слова (с учетом возможных пробелов перед скобкой)
         if line.startswith("if"):
             return "if"
         elif line.startswith("else if"):
@@ -22,9 +20,8 @@ class CppBlockDiagram(BlockDiagram):
         elif line.startswith("switch") or line.startswith("case"):
             return "if"
         else:
-            # Ищем плюсовый вывод (cout, printf, а также cin для ввода)
             if "cout" in line or "printf" in line or "cin" in line or "scanf" in line:
-                return "output"
+                return "i/o"
             else:
                 return "block"
 
