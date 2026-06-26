@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pseudogen"
+version = "0.2.4"
+description = "Generate pseudocode and block diagrams from Python/C++ code"
+readme = "README.md"
+authors = [
+    {name = "scodyx", email = "profftalexandr@gmail.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.7"
+dependencies = []
+
+[project.scripts]
+pseudogen = "src.pseudogen:main"
+
+[tool.setuptools]
+packages = ["src", "src.Python2FlowChart", "src.Python2FlowChart.Python2FlowChart", "src.Python2FlowChart.Python2FlowChart.PyChart", "src.Python2FlowChart.Python2FlowChart.PyChart.PyChart"]
+package-dir = {"" = "."}
