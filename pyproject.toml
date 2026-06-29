@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pseudogen"
-version = "0.2.4"
+version = "0.2.5"
 description = "Generate pseudocode and block diagrams from Python/C++ code"
 readme = "README.md"
 authors = [
@@ -17,7 +17,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.7"
-dependencies = []
+dependencies = ["chardet"]
 
 [project.scripts]
 pseudogen = "src.pseudogen:main"
