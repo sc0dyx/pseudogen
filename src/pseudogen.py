@@ -1,11 +1,9 @@
 import re
 import argparse
 import json
-import os
-import sys
-import json
 import sys
 from pathlib import Path
+import chardet
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -15,6 +13,17 @@ from Python2FlowChart.Python2FlowChart.Py2PseudoCode import Py2PseudoCode
 from Python2FlowChart.Python2FlowChart.CppBlockDiagram import CppBlockDiagram
 from Python2FlowChart.Python2FlowChart.CppPseudoCode import CppPseudoCode
 from Python2FlowChart.Python2FlowChart.CppPreprocessor import CppPreprocessor
+
+
+def detect_encoding(file_path: str) -> str:
+    """Определяет кодировку текстового файла."""
+    with open(file_path, "rb") as f:
+        raw = f.read(50000)
+    result = chardet.detect(raw)
+    enc = result["encoding"]
+    if enc and enc.lower().startswith("utf-8"):
+        return "utf-8-sig" if raw.startswith(b"\xef\xbb\xbf") else "utf-8"
+    return enc or "utf-8"
 
 
 class PseudoGen:
@@ -27,7 +36,7 @@ class PseudoGen:
         rules = []
 
         # Читаем правила из pgen файла
-        with open(self.pgen, "r", encoding="utf-8") as pgen_file:
+        with open(self.pgen, "r", encoding=detect_encoding(self.pgen)) as pgen_file:
             for line in pgen_file:
                 line = line.strip()
                 if not line or "->" not in line:
@@ -43,7 +52,7 @@ class PseudoGen:
 
         # Читаем входной файл и записываем результат в выходной
         with (
-            open(self.input, "r", encoding="utf-8") as input_file,
+            open(self.input, "r", encoding=detect_encoding(self.input)) as input_file,
             open(self.output, "w", encoding="utf-8") as output_file,
         ):
             for source_line in input_file:
@@ -53,7 +62,7 @@ class PseudoGen:
                 output_file.write(processed)
 
     def _generate_py_scheme(self):
-        with open(self.input, "r", encoding="utf-8") as read:
+        with open(self.input, "r", encoding=detect_encoding(self.input)) as read:
             p = PyPreprocessor(read)
         programs_list = p.get_programs_list()
         return Py2BlockDiagram.build_from_programs_list(
@@ -61,7 +70,7 @@ class PseudoGen:
         )
 
     def _generate_cpp_scheme(self):
-        with open(self.input, "r", encoding="utf-8") as read:
+        with open(self.input, "r", encoding=detect_encoding(self.input)) as read:
             p = CppPreprocessor(read)
         programs_list = p.get_programs_list()
         return CppBlockDiagram.build_from_programs_list(
